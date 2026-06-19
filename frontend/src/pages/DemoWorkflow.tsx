@@ -211,7 +211,8 @@ export function DemoWorkflow() {
     setError(null)
 
     try {
-      const response = await fetch(`/api/workflow/${selectedAgent.tier}`, {
+      const BASE = import.meta.env.VITE_API_URL || '/api'
+      const response = await fetch(`${BASE}/workflow/${selectedAgent.tier}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

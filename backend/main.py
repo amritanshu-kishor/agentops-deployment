@@ -107,17 +107,16 @@ async def root():
 async def test_ai(request: TestAIRequest):
     try:
         result = await ai_client.generate_response(request.prompt)
-        # Support both tuple/list and dict returns
-        if isinstance(result, (list, tuple)) and len(result) == 2:
-            provider, response_text = result
-        elif isinstance(result, dict):
-            provider = result.get("provider")
-            response_text = result.get("response_text")
+        # AIResponse is a tuple subclass: (provider_name, response_data_dict)
+        provider = result[0] if isinstance(result, (list, tuple)) else result.get("provider", "unknown")
+        data = result[1] if isinstance(result, (list, tuple)) else result
+        if isinstance(data, dict):
+            response_text = data.get("response_text", str(data))
         else:
-            raise ValueError("Unexpected AI client response format")
+            response_text = str(data)
         return TestAIResponse(
             status="success",
-            provider=provider,
+            provider=str(provider),
             response=response_text
         )
     except Exception as e:
