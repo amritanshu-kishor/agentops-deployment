@@ -13,7 +13,12 @@ from typing import List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from backend.schemas import HealthResponse, TestAIRequest, TestAIResponse, TestBandRequest, TestBandResponse, IntegrationStatusResponse
+from backend.schemas import (
+    HealthResponse, TestAIRequest, TestAIResponse, TestBandRequest, TestBandResponse,
+    IntegrationStatusResponse, WorkflowResponse, WorkflowDetailResponse,
+    AuditLogResponse, RiskLogResponse, PerformanceLogResponse, CostLogResponse,
+    AgentSummaryResponse,
+)
 from backend.models import WorkflowContext, AgentIdentity, WorkflowRequest
 from backend.ai_client import AIClient
 from backend.band_client import BandClient
@@ -169,27 +174,32 @@ async def trigger_medium_workflow(identity: AgentIdentity, db: AsyncSession = De
 async def trigger_high_workflow(identity: AgentIdentity, db: AsyncSession = Depends(get_db)):
     return await trigger_workflow(WorkflowRequest(identity=identity, tier="high"), db)
 
-@app.get("/workflow/{id}", tags=["Workflow"])
+@app.get("/workflow/{id}", response_model=WorkflowDetailResponse, tags=["Workflow"])
 async def get_workflow(id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WorkflowDB).filter_by(id=id))
     workflow = result.scalars().first()
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
-        
-    state = await redis_client.get_state(f"workflow:{id}")
-    return {
-        "id": workflow.id,
-        "agent_id": workflow.agent_id,
-        "tier": workflow.tier,
-        "status": workflow.status,
-        "created_at": workflow.created_at,
-        "band_room_id": workflow.band_room_id,
-        "error": workflow.error,
-        "final_decision": workflow.final_decision,
-        "transient_state": state
-    }
 
-@app.get("/workflow/{id}/audit", tags=["Workflow"])
+    state = await redis_client.get_state(f"workflow:{id}")
+    return WorkflowDetailResponse(
+        id=workflow.id,
+        agent_id=workflow.agent_id,
+        owner=workflow.owner,
+        model=workflow.model,
+        purpose=workflow.purpose,
+        tier=workflow.tier,
+        status=workflow.status,
+        created_at=workflow.created_at,
+        completed_at=workflow.completed_at,
+        band_room_id=workflow.band_room_id,
+        band_execution_id=workflow.band_execution_id,
+        error=workflow.error,
+        final_decision=workflow.final_decision,
+        transient_state=state,
+    )
+
+@app.get("/workflow/{id}/audit", response_model=List[AuditLogResponse], tags=["Workflow"])
 async def get_workflow_audit(id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AuditLogDB).filter_by(workflow_id=id).order_by(AuditLogDB.timestamp))
     return result.scalars().all()
@@ -198,27 +208,27 @@ async def get_workflow_audit(id: str, db: AsyncSession = Depends(get_db)):
 async def get_workflow_lineage(id: str, db: AsyncSession = Depends(get_db)):
     return await get_workflow_lineage_graph(id, db)
 
-@app.get("/workflow/{id}/cost", tags=["Workflow"])
+@app.get("/workflow/{id}/cost", response_model=List[CostLogResponse], tags=["Workflow"])
 async def get_workflow_cost(id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(CostLogDB).filter_by(workflow_id=id).order_by(CostLogDB.timestamp))
     return result.scalars().all()
 
-@app.get("/workflow/{id}/performance", tags=["Workflow"])
+@app.get("/workflow/{id}/performance", response_model=List[PerformanceLogResponse], tags=["Workflow"])
 async def get_workflow_performance(id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(PerformanceLogDB).filter_by(workflow_id=id).order_by(PerformanceLogDB.timestamp))
     return result.scalars().all()
 
-@app.get("/workflow/{id}/risk", tags=["Workflow"])
+@app.get("/workflow/{id}/risk", response_model=List[RiskLogResponse], tags=["Workflow"])
 async def get_workflow_risk(id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(RiskLogDB).filter_by(workflow_id=id).order_by(RiskLogDB.timestamp))
     return result.scalars().all()
 
-@app.get("/workflows", tags=["Workflow"])
+@app.get("/workflows", response_model=List[WorkflowResponse], tags=["Workflow"])
 async def get_workflows(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WorkflowDB).order_by(WorkflowDB.created_at.desc()))
     return result.scalars().all()
 
-@app.get("/agents", tags=["Agents"])
+@app.get("/agents", response_model=List[AgentSummaryResponse], tags=["Agents"])
 async def get_agents(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WorkflowDB).order_by(WorkflowDB.created_at.desc()))
     seen = set()
@@ -227,13 +237,13 @@ async def get_agents(db: AsyncSession = Depends(get_db)):
         if workflow.agent_id in seen:
             continue
         seen.add(workflow.agent_id)
-        agents.append({
-            "agent_id": workflow.agent_id,
-            "owner": workflow.owner,
-            "model": workflow.model,
-            "purpose": workflow.purpose,
-            "tier": workflow.tier,
-        })
+        agents.append(AgentSummaryResponse(
+            agent_id=workflow.agent_id,
+            owner=workflow.owner,
+            model=workflow.model,
+            purpose=workflow.purpose,
+            tier=workflow.tier,
+        ))
     return agents
 
 # duplicate /test-ai route removed – the canonical one is at line 94
